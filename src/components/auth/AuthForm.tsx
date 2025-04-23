@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom";
 import { LoadingButton } from "../shared/LoadingButton";
 import { GlassMorphicCard } from "../shared/GlassMorphicCard";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { useToast } from "@/hooks/use-toast";
 
 const Step1Schema = z.object({
   name: z.string().min(2, {
@@ -54,6 +55,7 @@ export const AuthForm = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
+  const { toast } = useToast();
 
   const step1Form = useForm<z.infer<typeof Step1Schema>>({
     resolver: zodResolver(Step1Schema),
@@ -127,6 +129,10 @@ export const AuthForm = () => {
           });
           setOtpSent(true);
           otpForm.reset({ otp: "" });
+          toast({
+            title: "Cod trimis",
+            description: "Codul OTP a fost trimis la numărul tău de telefon.",
+          });
         } else {
           step2Form.setError("root", { message: response.error });
         }
@@ -139,6 +145,11 @@ export const AuthForm = () => {
   };
 
   const onSubmitOtp = async (data: z.infer<typeof OtpSchema>) => {
+    if (!data.otp || data.otp.length < 4) {
+      otpForm.setError("otp", { message: "Vă rugăm să introduceți codul complet." });
+      return;
+    }
+    
     setIsLoading(true);
     try {
       const response = await api.auth.verifyOtp(
@@ -230,7 +241,15 @@ export const AuthForm = () => {
   };
 
   const handleOtpValueChange = (value: string) => {
-    otpForm.setValue("otp", value);
+    otpForm.setValue("otp", value, { shouldValidate: true });
+    if (otpForm.formState.errors.otp) {
+      otpForm.clearErrors("otp");
+    }
+  };
+
+  const resendOtp = () => {
+    setOtpSent(false);
+    otpForm.reset({ otp: "" });
   };
 
   return (
@@ -361,7 +380,7 @@ export const AuthForm = () => {
                             maxLength={4} 
                             value={field.value} 
                             onChange={handleOtpValueChange}
-                            disabled={false}
+                            disabled={isLoading}
                             autoFocus
                           >
                             <InputOTPGroup>
@@ -388,10 +407,7 @@ export const AuthForm = () => {
                     variant="ghost"
                     type="button"
                     className="w-full mt-2"
-                    onClick={() => {
-                      setOtpSent(false);
-                      otpForm.reset({ otp: "" });
-                    }}
+                    onClick={resendOtp}
                   >
                     Retrimite cod
                   </Button>
