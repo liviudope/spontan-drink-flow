@@ -126,6 +126,7 @@ export const AuthForm = () => {
             payload: { phone: data.phone },
           });
           setOtpSent(true);
+          otpForm.reset({ otp: "" });
         } else {
           step2Form.setError("root", { message: response.error });
         }
@@ -226,6 +227,10 @@ export const AuthForm = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleOtpValueChange = (value: string) => {
+    otpForm.setValue("otp", value);
   };
 
   return (
@@ -352,7 +357,13 @@ export const AuthForm = () => {
                       <FormItem>
                         <FormLabel>Cod OTP</FormLabel>
                         <FormControl>
-                          <InputOTP maxLength={4} {...field} value={field.value}>
+                          <InputOTP 
+                            maxLength={4} 
+                            value={field.value} 
+                            onChange={handleOtpValueChange}
+                            disabled={false}
+                            autoFocus
+                          >
                             <InputOTPGroup>
                               <InputOTPSlot index={0} />
                               <InputOTPSlot index={1} />
@@ -379,7 +390,7 @@ export const AuthForm = () => {
                     className="w-full mt-2"
                     onClick={() => {
                       setOtpSent(false);
-                      otpForm.reset();
+                      otpForm.reset({ otp: "" });
                     }}
                   >
                     Retrimite cod
