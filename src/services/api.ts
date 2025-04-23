@@ -1,4 +1,3 @@
-
 import { User, Order, OrderStatus, Message } from '../contexts/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -64,6 +63,9 @@ export const api = {
     
     async verifyOtp(phone: string, otp: string): Promise<{ success: boolean; error?: string }> {
       await delay(1000); // Simulate network delay
+      
+      console.log(`Verifying OTP: ${otp} for phone: ${phone}`);
+      console.log(`Stored OTPs:`, otpStore);
       
       const storedData = otpStore[phone];
       

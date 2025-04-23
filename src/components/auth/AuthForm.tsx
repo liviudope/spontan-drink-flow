@@ -241,7 +241,9 @@ export const AuthForm = () => {
   };
 
   const handleOtpValueChange = (value: string) => {
-    otpForm.setValue("otp", value, { shouldValidate: true });
+    console.log("OTP value changed:", value);
+    otpForm.setValue("otp", value, { shouldValidate: value.length === 4 });
+    
     if (otpForm.formState.errors.otp) {
       otpForm.clearErrors("otp");
     }
@@ -376,20 +378,22 @@ export const AuthForm = () => {
                       <FormItem>
                         <FormLabel>Cod OTP</FormLabel>
                         <FormControl>
-                          <InputOTP 
-                            maxLength={4} 
-                            value={field.value} 
-                            onChange={handleOtpValueChange}
-                            disabled={isLoading}
-                            autoFocus
-                          >
-                            <InputOTPGroup>
-                              <InputOTPSlot index={0} />
-                              <InputOTPSlot index={1} />
-                              <InputOTPSlot index={2} />
-                              <InputOTPSlot index={3} />
-                            </InputOTPGroup>
-                          </InputOTP>
+                          <div className="flex justify-center">
+                            <InputOTP 
+                              maxLength={4} 
+                              value={field.value} 
+                              onChange={handleOtpValueChange}
+                              disabled={isLoading}
+                              autoFocus
+                            >
+                              <InputOTPGroup>
+                                <InputOTPSlot index={0} />
+                                <InputOTPSlot index={1} />
+                                <InputOTPSlot index={2} />
+                                <InputOTPSlot index={3} />
+                              </InputOTPGroup>
+                            </InputOTP>
+                          </div>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
