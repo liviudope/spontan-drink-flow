@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +11,7 @@ import { useApp } from "@/contexts/AppContext";
 import { useNavigate } from "react-router-dom";
 import { LoadingButton } from "../shared/LoadingButton";
 import { GlassMorphicCard } from "../shared/GlassMorphicCard";
+import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 
 const Step1Schema = z.object({
   name: z.string().min(2, {
@@ -164,7 +164,6 @@ export const AuthForm = () => {
   const onSubmitStep3 = async (data: z.infer<typeof Step3Schema>) => {
     setIsLoading(true);
     try {
-      // Mock payment processing
       const response = await api.auth.addPaymentMethod(
         state.tempUserData.id || "",
         {
@@ -199,7 +198,6 @@ export const AuthForm = () => {
     }
   };
 
-  // Dev shortcut for testing
   const handleBarmanLogin = async () => {
     setIsLoading(true);
     try {
@@ -354,7 +352,14 @@ export const AuthForm = () => {
                       <FormItem>
                         <FormLabel>Cod OTP</FormLabel>
                         <FormControl>
-                          <Input placeholder="1234" maxLength={4} {...field} />
+                          <InputOTP maxLength={4} {...field} value={field.value}>
+                            <InputOTPGroup>
+                              <InputOTPSlot index={0} />
+                              <InputOTPSlot index={1} />
+                              <InputOTPSlot index={2} />
+                              <InputOTPSlot index={3} />
+                            </InputOTPGroup>
+                          </InputOTP>
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -372,7 +377,10 @@ export const AuthForm = () => {
                     variant="ghost"
                     type="button"
                     className="w-full mt-2"
-                    onClick={() => setOtpSent(false)}
+                    onClick={() => {
+                      setOtpSent(false);
+                      otpForm.reset();
+                    }}
                   >
                     Retrimite cod
                   </Button>
