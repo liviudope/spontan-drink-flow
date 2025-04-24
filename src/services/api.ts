@@ -18,7 +18,7 @@ export const api = {
             user: { 
               ...existingUser,
               verified: existingUser.verified,
-              role: existingUser.role || 'client'
+              role: (existingUser.role as User['role']) || 'client'
             }
           };
         }
@@ -47,7 +47,10 @@ export const api = {
 
           if (insertError) throw insertError;
           
-          return { success: true, user: newUser };
+          return { success: true, user: {
+            ...newUser,
+            role: 'client' as User['role']
+          }};
         }
         
         return { success: false, error: 'Could not create user' };
@@ -141,7 +144,7 @@ export const api = {
           phone: userMeta.phone || undefined,
           verified: userMeta.verified || false,
           tokens: userMeta.tokens || 0,
-          role: userMeta.role || 'client'
+          role: (userMeta.role as User['role']) || 'client'
         };
     
         return { success: true, user: userData };

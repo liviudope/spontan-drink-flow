@@ -222,7 +222,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
               phone: userMeta.phone,
               verified: userMeta.verified,
               tokens: userMeta.tokens,
-              role: userMeta.role || 'client'
+              role: (userMeta.role as UserRole) || 'client'
             }
           });
         }
@@ -249,7 +249,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
                 phone: userMeta.phone,
                 verified: userMeta.verified,
                 tokens: userMeta.tokens,
-                role: userMeta.role || 'client'
+                role: (userMeta.role as UserRole) || 'client'
               }
             });
           }
