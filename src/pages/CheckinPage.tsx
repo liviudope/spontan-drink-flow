@@ -113,7 +113,7 @@ const CheckinPage = () => {
                   Acest check-in va costa 1 token. Verifică că ai suficiente tokenuri.
                 </p>
                 <div className="rounded-lg overflow-hidden">
-                  <QrScanner onScan={handleScan} isProcessing={isLoading} />
+                  <QrScanner />
                 </div>
                 {isLoading && (
                   <p className="text-center animate-pulse">Se procesează...</p>

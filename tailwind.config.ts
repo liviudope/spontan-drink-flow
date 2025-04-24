@@ -67,6 +67,7 @@ export default {
 					purple: '#8B5CF6',
 					blue: '#06B6D4',
 					pink: '#EC4899',
+					green: '#10B981',
 				},
 			},
 			borderRadius: {
