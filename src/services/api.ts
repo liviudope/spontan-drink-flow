@@ -1,4 +1,3 @@
-
 import { User, Order, OrderStatus, Message, TokenPurchase } from '../contexts/AppContext';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -207,12 +206,21 @@ export const api = {
           return { success: false, error: 'Pachet invalid' };
         }
         
-        // Fix the type error: Using a numeric expression instead of a function
         const tokensToAdd = selectedPackage.tokens + selectedPackage.bonus;
+        
+        const { data: userMeta, error: fetchError } = await supabase
+          .from('users_meta')
+          .select('tokens')
+          .eq('id', userId)
+          .single();
+        
+        if (fetchError) throw fetchError;
+        
+        const newTokenBalance = (userMeta?.tokens || 0) + tokensToAdd;
         
         const { error: updateError } = await supabase
           .from('users_meta')
-          .update({ tokens: supabase.rpc('increment', { x: tokensToAdd }) })
+          .update({ tokens: newTokenBalance })
           .eq('id', userId);
         
         if (updateError) throw updateError;
