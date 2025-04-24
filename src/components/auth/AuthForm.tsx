@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/services/api";
 import { useApp } from "@/contexts/AppContext";
@@ -13,6 +13,8 @@ import { LoadingButton } from "../shared/LoadingButton";
 import { GlassMorphicCard } from "../shared/GlassMorphicCard";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { useToast } from "@/hooks/use-toast";
+
+type AuthStep = "phone" | "otp" | "success";
 
 const Step1Schema = z.object({
   name: z.string().min(2, {
@@ -31,7 +33,7 @@ const Step2Schema = z.object({
 
 const OtpSchema = z.object({
   otp: z.string().length(4, {
-    message: "Codul OTP trebuie să aibă 4 cifre",
+    message: "Codul OTP trebuie să aibă exact 4 cifre",
   }),
 });
 
@@ -56,6 +58,8 @@ export const AuthForm = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const { toast } = useToast();
+  const [step, setStep] = useState<AuthStep>("phone");
+  const [error, setError] = useState<string | null>(null);
 
   const step1Form = useForm<z.infer<typeof Step1Schema>>({
     resolver: zodResolver(Step1Schema),
@@ -89,6 +93,13 @@ export const AuthForm = () => {
     },
   });
 
+  // Reset OTP form when moving to OTP step
+  useEffect(() => {
+    if (step === "otp") {
+      otpForm.reset({ otp: "" });
+    }
+  }, [step, otpForm]);
+
   const onSubmitStep1 = async (data: z.infer<typeof Step1Schema>) => {
     setIsLoading(true);
     try {
@@ -117,44 +128,40 @@ export const AuthForm = () => {
     }
   };
 
-  const onSubmitStep2 = async (data: z.infer<typeof Step2Schema>) => {
-    if (!otpSent) {
-      setIsLoading(true);
-      try {
-        const response = await api.auth.sendOtp(data.phone);
-        if (response.success) {
-          dispatch({
-            type: "UPDATE_TEMP_USER_DATA",
-            payload: { phone: data.phone },
-          });
-          setOtpSent(true);
-          otpForm.reset({ otp: "" });
-          toast({
-            title: "Cod trimis",
-            description: "Codul OTP a fost trimis la numărul tău de telefon.",
-          });
-        } else {
-          step2Form.setError("root", { message: response.error });
-        }
-      } catch (error) {
-        step2Form.setError("root", { message: "A apărut o eroare. Încercați din nou." });
-      } finally {
-        setIsLoading(false);
+  const onPhoneSubmit = async (values: z.infer<typeof Step2Schema>) => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await api.auth.sendOtp(values.phone);
+      if (response.success) {
+        dispatch({
+          type: "UPDATE_TEMP_USER_DATA",
+          payload: { phone: values.phone },
+        });
+        setOtpSent(true);
+        setStep("otp");
+        otpForm.reset({ otp: "" });
+        toast({
+          title: "Cod trimis",
+          description: "Codul OTP a fost trimis la numărul tău de telefon.",
+        });
+      } else {
+        step2Form.setError("root", { message: response.error });
       }
+    } catch (err) {
+      setError("An error occurred while sending OTP");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const onSubmitOtp = async (data: z.infer<typeof OtpSchema>) => {
-    if (!data.otp || data.otp.length < 4) {
-      otpForm.setError("otp", { message: "Vă rugăm să introduceți codul complet." });
-      return;
-    }
-    
+  const onOtpSubmit = async (values: z.infer<typeof OtpSchema>) => {
     setIsLoading(true);
+    setError(null);
     try {
       const response = await api.auth.verifyOtp(
         state.tempUserData.phone || "",
-        data.otp
+        values.otp
       );
 
       if (response.success) {
@@ -162,12 +169,13 @@ export const AuthForm = () => {
           type: "UPDATE_TEMP_USER_DATA",
           payload: { verified: true },
         });
+        setStep("success");
         dispatch({ type: "SET_AUTH_STEP", payload: 3 });
       } else {
         otpForm.setError("otp", { message: response.error });
       }
-    } catch (error) {
-      otpForm.setError("root", { message: "A apărut o eroare. Încercați din nou." });
+    } catch (err) {
+      setError("An error occurred while verifying OTP");
     } finally {
       setIsLoading(false);
     }
@@ -240,17 +248,9 @@ export const AuthForm = () => {
     }
   };
 
-  const handleOtpValueChange = (value: string) => {
-    console.log("OTP value changed:", value);
-    otpForm.setValue("otp", value, { shouldValidate: value.length === 4 });
-    
-    if (otpForm.formState.errors.otp) {
-      otpForm.clearErrors("otp");
-    }
-  };
-
   const resendOtp = () => {
     setOtpSent(false);
+    setStep("phone");
     otpForm.reset({ otp: "" });
   };
 
@@ -326,103 +326,105 @@ export const AuthForm = () => {
         </GlassMorphicCard>
       )}
 
-      {state.authStep === 2 && (
+      {step === "phone" && (
         <GlassMorphicCard variant="blue" className="w-full">
           <CardHeader>
             <CardTitle className="text-2xl font-bold">Verificare telefon</CardTitle>
             <CardDescription>
-              {otpSent
-                ? "Introdu codul primit prin SMS"
-                : "Adaugă numărul tău de telefon pentru verificare"}
+              Adaugă numărul tău de telefon pentru verificare
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {!otpSent ? (
-              <Form {...step2Form}>
-                <form onSubmit={step2Form.handleSubmit(onSubmitStep2)} className="space-y-4">
-                  <FormField
-                    control={step2Form.control}
-                    name="phone"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Telefon</FormLabel>
-                        <FormControl>
-                          <Input placeholder="07xxxxxxxx" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <LoadingButton 
-                    isLoading={isLoading} 
-                    loadingText="Se trimite..."
-                    type="submit"
-                    className="w-full"
-                  >
-                    Trimite cod
-                  </LoadingButton>
-                  {step2Form.formState.errors.root && (
-                    <p className="text-red-500 text-sm mt-2">
-                      {step2Form.formState.errors.root.message}
-                    </p>
+            <Form {...step2Form}>
+              <form onSubmit={step2Form.handleSubmit(onPhoneSubmit)} className="space-y-4">
+                <FormField
+                  control={step2Form.control}
+                  name="phone"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Telefon</FormLabel>
+                      <FormControl>
+                        <Input placeholder="07xxxxxxxx" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                </form>
-              </Form>
-            ) : (
-              <Form {...otpForm}>
-                <form onSubmit={otpForm.handleSubmit(onSubmitOtp)} className="space-y-4">
-                  <FormField
-                    control={otpForm.control}
-                    name="otp"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Cod OTP</FormLabel>
-                        <FormControl>
-                          <div className="flex justify-center">
-                            <InputOTP 
-                              maxLength={4} 
-                              value={field.value} 
-                              onChange={handleOtpValueChange}
-                              disabled={isLoading}
-                              autoFocus
-                            >
-                              <InputOTPGroup>
-                                <InputOTPSlot index={0} />
-                                <InputOTPSlot index={1} />
-                                <InputOTPSlot index={2} />
-                                <InputOTPSlot index={3} />
-                              </InputOTPGroup>
-                            </InputOTP>
-                          </div>
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                  <LoadingButton 
-                    isLoading={isLoading} 
-                    loadingText="Se verifică..."
-                    type="submit"
-                    className="w-full"
-                  >
-                    Verifică codul
-                  </LoadingButton>
-                  <Button
-                    variant="ghost"
-                    type="button"
-                    className="w-full mt-2"
-                    onClick={resendOtp}
-                  >
-                    Retrimite cod
-                  </Button>
-                  {otpForm.formState.errors.root && (
-                    <p className="text-red-500 text-sm mt-2">
-                      {otpForm.formState.errors.root.message}
-                    </p>
+                />
+                <Button type="submit" className="w-full" disabled={isLoading}>
+                  {isLoading ? "Se trimite..." : "Trimite cod"}
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
+        </GlassMorphicCard>
+      )}
+
+      {step === "otp" && (
+        <GlassMorphicCard variant="blue" className="w-full">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold">Verificare telefon</CardTitle>
+            <CardDescription>
+              Introdu codul primit prin SMS
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...otpForm}>
+              <form onSubmit={otpForm.handleSubmit(onOtpSubmit)} className="space-y-4">
+                <FormField
+                  control={otpForm.control}
+                  name="otp"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Enter OTP</FormLabel>
+                      <FormControl>
+                        <div className="flex justify-center">
+                          <InputOTP
+                            value={field.value}
+                            onChange={(value) => {
+                              field.onChange(value);
+                            }}
+                            maxLength={4}
+                            disabled={isLoading}
+                          >
+                            <InputOTPGroup>
+                              <InputOTPSlot index={0} />
+                              <InputOTPSlot index={1} />
+                              <InputOTPSlot index={2} />
+                              <InputOTPSlot index={3} />
+                            </InputOTPGroup>
+                          </InputOTP>
+                        </div>
+                      </FormControl>
+                      <FormDescription>
+                        Enter the 4-digit code sent to your phone
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
                   )}
-                </form>
-              </Form>
-            )}
+                />
+                <LoadingButton
+                  isLoading={isLoading}
+                  loadingText="Se verifică..."
+                  type="submit"
+                  className="w-full"
+                >
+                  Verifică codul
+                </LoadingButton>
+                <Button
+                  variant="ghost"
+                  type="button"
+                  className="w-full mt-2"
+                  onClick={resendOtp}
+                >
+                  Retrimite cod
+                </Button>
+                {error && (
+                  <p className="text-red-500 text-sm mt-2">
+                    {error}
+                  </p>
+                )}
+              </form>
+            </Form>
           </CardContent>
         </GlassMorphicCard>
       )}
