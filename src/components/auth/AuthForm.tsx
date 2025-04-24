@@ -15,18 +15,9 @@ import { GlassMorphicCard } from "../shared/GlassMorphicCard";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { useToast } from "@/hooks/use-toast";
 
-type AuthStep = "phone" | "otp" | "success";
+type AuthStep = "phone" | "otp" | "profile" | "payment";
 
-const Step1Schema = z.object({
-  name: z.string().min(2, {
-    message: "Numele trebuie să aibă cel puțin 2 caractere",
-  }),
-  email: z.string().email({
-    message: "Adresă de email invalidă",
-  }),
-});
-
-const Step2Schema = z.object({
+const PhoneSchema = z.object({
   phone: z.string().min(9, {
     message: "Numărul de telefon trebuie să aibă cel puțin 9 caractere",
   }),
@@ -38,7 +29,16 @@ const OtpSchema = z.object({
   }),
 });
 
-const Step3Schema = z.object({
+const ProfileSchema = z.object({
+  name: z.string().min(2, {
+    message: "Numele trebuie să aibă cel puțin 2 caractere",
+  }),
+  email: z.string().email({
+    message: "Adresă de email invalidă",
+  }),
+});
+
+const PaymentSchema = z.object({
   cardNumber: z.string().regex(/^\d{16}$/, {
     message: "Numărul cardului trebuie să aibă 16 cifre",
   }),
@@ -61,17 +61,10 @@ export const AuthForm = () => {
   const { toast } = useToast();
   const [step, setStep] = useState<AuthStep>("phone");
   const [error, setError] = useState<string | null>(null);
+  const [isNewUser, setIsNewUser] = useState(false);
 
-  const step1Form = useForm<z.infer<typeof Step1Schema>>({
-    resolver: zodResolver(Step1Schema),
-    defaultValues: {
-      name: state.tempUserData.name || "",
-      email: state.tempUserData.email || "",
-    },
-  });
-
-  const step2Form = useForm<z.infer<typeof Step2Schema>>({
-    resolver: zodResolver(Step2Schema),
+  const phoneForm = useForm<z.infer<typeof PhoneSchema>>({
+    resolver: zodResolver(PhoneSchema),
     defaultValues: {
       phone: state.tempUserData.phone || "",
     },
@@ -84,8 +77,16 @@ export const AuthForm = () => {
     },
   });
 
-  const step3Form = useForm<z.infer<typeof Step3Schema>>({
-    resolver: zodResolver(Step3Schema),
+  const profileForm = useForm<z.infer<typeof ProfileSchema>>({
+    resolver: zodResolver(ProfileSchema),
+    defaultValues: {
+      name: state.tempUserData.name || "",
+      email: state.tempUserData.email || "",
+    },
+  });
+
+  const paymentForm = useForm<z.infer<typeof PaymentSchema>>({
+    resolver: zodResolver(PaymentSchema),
     defaultValues: {
       cardNumber: "",
       cardName: "",
@@ -154,56 +155,47 @@ export const AuthForm = () => {
     }
   };
 
-  const onSubmitStep1 = async (data: z.infer<typeof Step1Schema>) => {
-    setIsLoading(true);
-    try {
-      const response = await api.auth.start({
-        name: data.name,
-        email: data.email,
-      });
-
-      if (response.success) {
-        dispatch({
-          type: "UPDATE_TEMP_USER_DATA",
-          payload: {
-            name: data.name,
-            email: data.email,
-            ...(response.user || {}),
-          },
-        });
-        dispatch({ type: "SET_AUTH_STEP", payload: 2 });
-      } else {
-        step1Form.setError("root", { message: response.error });
-      }
-    } catch (error) {
-      step1Form.setError("root", { message: "A apărut o eroare. Încercați din nou." });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const onPhoneSubmit = async (values: z.infer<typeof Step2Schema>) => {
+  const onPhoneSubmit = async (values: z.infer<typeof PhoneSchema>) => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.auth.sendOtp(values.phone);
-      if (response.success) {
+      // First check if the user exists
+      const userResponse = await api.auth.start({
+        phone: values.phone,
+      });
+      
+      if (userResponse.success) {
+        // Store any returned user data
         dispatch({
           type: "UPDATE_TEMP_USER_DATA",
-          payload: { phone: values.phone },
+          payload: {
+            ...userResponse.user,
+            phone: values.phone
+          },
         });
-        setOtpSent(true);
-        setStep("otp");
-        otpForm.reset({ otp: "" });
-        toast({
-          title: "Cod trimis",
-          description: "Codul OTP a fost trimis la numărul tău de telefon.",
-        });
+        
+        // Determine if this is a new user
+        setIsNewUser(!userResponse.user?.name || !userResponse.user.verified);
+        
+        // Send OTP via Supabase
+        const otpResponse = await api.auth.sendOtp(values.phone);
+        
+        if (otpResponse.success) {
+          setOtpSent(true);
+          setStep("otp");
+          otpForm.reset({ otp: "" });
+          toast({
+            title: "Cod trimis",
+            description: "Codul OTP a fost trimis la numărul tău de telefon.",
+          });
+        } else {
+          phoneForm.setError("root", { message: otpResponse.error });
+        }
       } else {
-        step2Form.setError("root", { message: response.error });
+        phoneForm.setError("root", { message: userResponse.error });
       }
     } catch (err) {
-      setError("An error occurred while sending OTP");
+      setError("A apărut o eroare la trimiterea codului OTP");
     } finally {
       setIsLoading(false);
     }
@@ -213,35 +205,93 @@ export const AuthForm = () => {
     setIsLoading(true);
     setError(null);
     try {
-      const response = await api.auth.verifyOtp(
-        state.tempUserData.phone || "",
-        values.otp
-      );
+      const phone = state.tempUserData.phone || "";
+      const response = await api.auth.verifyOtp(phone, values.otp);
 
       if (response.success) {
+        // Store session token for persistent login
         if (response.sessionToken) {
-          // Store session token for persistent login
           localStorage.setItem('spontanSession', JSON.stringify({ token: response.sessionToken }));
           dispatch({ type: 'SET_SESSION_TOKEN', payload: response.sessionToken });
         }
         
-        dispatch({
-          type: "UPDATE_TEMP_USER_DATA",
-          payload: { verified: true },
-        });
-        setStep("success");
-        dispatch({ type: "SET_AUTH_STEP", payload: 3 });
+        // Update temp user data with any returned user info
+        if (response.user) {
+          dispatch({
+            type: "UPDATE_TEMP_USER_DATA",
+            payload: response.user
+          });
+        }
+        
+        // If new user or missing profile info, continue to profile step
+        if (isNewUser || !state.tempUserData.name) {
+          setStep("profile");
+        } else {
+          // Set the user in state
+          if (response.user) {
+            dispatch({ type: 'SET_USER', payload: response.user as User });
+            
+            // Check tokens and redirect appropriately
+            if (response.user.tokens && response.user.tokens > 0) {
+              navigate('/');
+            } else {
+              navigate('/tokens');
+              toast({
+                title: "Tokens necesari",
+                description: "Nu ai tokens în cont. Te rugăm să achiziționezi tokens pentru a continua.",
+                variant: "default",
+              });
+            }
+          }
+        }
       } else {
         otpForm.setError("otp", { message: response.error });
       }
     } catch (err) {
-      setError("An error occurred while verifying OTP");
+      setError("A apărut o eroare la verificarea codului OTP");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const onSubmitStep3 = async (data: z.infer<typeof Step3Schema>) => {
+  const onProfileSubmit = async (data: z.infer<typeof ProfileSchema>) => {
+    setIsLoading(true);
+    try {
+      // Update user profile with name and email
+      const userId = state.tempUserData.id;
+      
+      if (userId) {
+        const updateResponse = await api.auth.updateUserProfile(userId, {
+          name: data.name,
+          email: data.email
+        });
+        
+        if (updateResponse.success) {
+          // Update temp user data
+          dispatch({
+            type: "UPDATE_TEMP_USER_DATA",
+            payload: {
+              name: data.name,
+              email: data.email
+            },
+          });
+          
+          // Continue to payment or finalize
+          setStep("payment");
+        } else {
+          profileForm.setError("root", { message: updateResponse.error });
+        }
+      } else {
+        profileForm.setError("root", { message: "ID utilizator lipsă" });
+      }
+    } catch (error) {
+      profileForm.setError("root", { message: "A apărut o eroare. Încercați din nou." });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const onPaymentSubmit = async (data: z.infer<typeof PaymentSchema>) => {
     setIsLoading(true);
     try {
       const response = await api.auth.addPaymentMethod(
@@ -255,12 +305,13 @@ export const AuthForm = () => {
       );
 
       if (response.success) {
-        // Store session token for persistent login
+        // Store session token for persistent login if provided
         if (response.sessionToken) {
           localStorage.setItem('spontanSession', JSON.stringify({ token: response.sessionToken }));
           dispatch({ type: 'SET_SESSION_TOKEN', payload: response.sessionToken });
         }
         
+        // Create complete user object
         const user = {
           id: state.tempUserData.id || "",
           name: state.tempUserData.name || "",
@@ -269,12 +320,13 @@ export const AuthForm = () => {
           verified: true,
           role: state.tempUserData.role || "client",
           paymentVerified: true,
-          tokens: 0
+          tokens: state.tempUserData.tokens || 0
         };
         
+        // Set user in state
         dispatch({ type: "SET_USER", payload: user });
         
-        // Redirect to tokens page since user has 0 tokens
+        // Redirect to tokens page if user has 0 tokens
         navigate("/tokens");
         toast({
           title: "Cont creat cu succes!",
@@ -282,10 +334,10 @@ export const AuthForm = () => {
           variant: "default",
         });
       } else {
-        step3Form.setError("root", { message: response.error });
+        paymentForm.setError("root", { message: response.error });
       }
     } catch (error) {
-      step3Form.setError("root", { message: "A apărut o eroare. Încercați din nou." });
+      paymentForm.setError("root", { message: "A apărut o eroare. Încercați din nou." });
     } finally {
       setIsLoading(false);
     }
@@ -335,38 +387,25 @@ export const AuthForm = () => {
         className="h-20 mb-4"
       />
       
-      {state.authStep === 1 && (
-        <GlassMorphicCard variant="purple" className="w-full">
+      {step === "phone" && (
+        <GlassMorphicCard variant="blue" className="w-full">
           <CardHeader>
-            <CardTitle className="text-2xl font-bold">Bine ai venit!</CardTitle>
+            <CardTitle className="text-2xl font-bold">Autentificare</CardTitle>
             <CardDescription>
-              Introdu numele și email-ul tău pentru a începe
+              Introdu numărul tău de telefon pentru a primi un cod de verificare
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Form {...step1Form}>
-              <form onSubmit={step1Form.handleSubmit(onSubmitStep1)} className="space-y-4">
+            <Form {...phoneForm}>
+              <form onSubmit={phoneForm.handleSubmit(onPhoneSubmit)} className="space-y-4">
                 <FormField
-                  control={step1Form.control}
-                  name="name"
+                  control={phoneForm.control}
+                  name="phone"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Nume</FormLabel>
+                      <FormLabel>Telefon</FormLabel>
                       <FormControl>
-                        <Input placeholder="Numele tău" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={step1Form.control}
-                  name="email"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Email</FormLabel>
-                      <FormControl>
-                        <Input placeholder="email@exemplu.com" {...field} />
+                        <Input placeholder="07xxxxxxxx" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -374,15 +413,15 @@ export const AuthForm = () => {
                 />
                 <LoadingButton 
                   isLoading={isLoading} 
-                  loadingText="Se verifică..."
+                  loadingText="Se trimite..."
                   type="submit"
                   className="w-full"
                 >
-                  Continuă
+                  Trimite cod
                 </LoadingButton>
-                {step1Form.formState.errors.root && (
+                {phoneForm.formState.errors.root && (
                   <p className="text-red-500 text-sm mt-2">
-                    {step1Form.formState.errors.root.message}
+                    {phoneForm.formState.errors.root.message}
                   </p>
                 )}
               </form>
@@ -396,39 +435,6 @@ export const AuthForm = () => {
               Login ca barman (demo)
             </Button>
           </CardFooter>
-        </GlassMorphicCard>
-      )}
-
-      {step === "phone" && (
-        <GlassMorphicCard variant="blue" className="w-full">
-          <CardHeader>
-            <CardTitle className="text-2xl font-bold">Verificare telefon</CardTitle>
-            <CardDescription>
-              Adaugă numărul tău de telefon pentru verificare
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Form {...step2Form}>
-              <form onSubmit={step2Form.handleSubmit(onPhoneSubmit)} className="space-y-4">
-                <FormField
-                  control={step2Form.control}
-                  name="phone"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Telefon</FormLabel>
-                      <FormControl>
-                        <Input placeholder="07xxxxxxxx" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <Button type="submit" className="w-full" disabled={isLoading}>
-                  {isLoading ? "Se trimite..." : "Trimite cod"}
-                </Button>
-              </form>
-            </Form>
-          </CardContent>
         </GlassMorphicCard>
       )}
 
@@ -448,7 +454,7 @@ export const AuthForm = () => {
                   name="otp"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Enter OTP</FormLabel>
+                      <FormLabel>Cod OTP</FormLabel>
                       <FormControl>
                         <div className="flex justify-center">
                           <InputOTP
@@ -468,9 +474,6 @@ export const AuthForm = () => {
                           </InputOTP>
                         </div>
                       </FormControl>
-                      <FormDescription>
-                        Enter the 4-digit code sent to your phone
-                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -502,7 +505,63 @@ export const AuthForm = () => {
         </GlassMorphicCard>
       )}
 
-      {state.authStep === 3 && (
+      {step === "profile" && (
+        <GlassMorphicCard variant="purple" className="w-full">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold">Completează profilul</CardTitle>
+            <CardDescription>
+              Adaugă informațiile personale pentru a continua
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...profileForm}>
+              <form onSubmit={profileForm.handleSubmit(onProfileSubmit)} className="space-y-4">
+                <FormField
+                  control={profileForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nume</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Numele tău" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={profileForm.control}
+                  name="email"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email</FormLabel>
+                      <FormControl>
+                        <Input placeholder="email@exemplu.com" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <LoadingButton 
+                  isLoading={isLoading} 
+                  loadingText="Se salvează..."
+                  type="submit"
+                  className="w-full"
+                >
+                  Continuă
+                </LoadingButton>
+                {profileForm.formState.errors.root && (
+                  <p className="text-red-500 text-sm mt-2">
+                    {profileForm.formState.errors.root.message}
+                  </p>
+                )}
+              </form>
+            </Form>
+          </CardContent>
+        </GlassMorphicCard>
+      )}
+
+      {step === "payment" && (
         <GlassMorphicCard variant="pink" className="w-full">
           <CardHeader>
             <CardTitle className="text-2xl font-bold">Detalii plată</CardTitle>
@@ -511,10 +570,10 @@ export const AuthForm = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Form {...step3Form}>
-              <form onSubmit={step3Form.handleSubmit(onSubmitStep3)} className="space-y-4">
+            <Form {...paymentForm}>
+              <form onSubmit={paymentForm.handleSubmit(onPaymentSubmit)} className="space-y-4">
                 <FormField
-                  control={step3Form.control}
+                  control={paymentForm.control}
                   name="cardNumber"
                   render={({ field }) => (
                     <FormItem>
@@ -531,7 +590,7 @@ export const AuthForm = () => {
                   )}
                 />
                 <FormField
-                  control={step3Form.control}
+                  control={paymentForm.control}
                   name="cardName"
                   render={({ field }) => (
                     <FormItem>
@@ -545,7 +604,7 @@ export const AuthForm = () => {
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
-                    control={step3Form.control}
+                    control={paymentForm.control}
                     name="cardExpiry"
                     render={({ field }) => (
                       <FormItem>
@@ -558,7 +617,7 @@ export const AuthForm = () => {
                     )}
                   />
                   <FormField
-                    control={step3Form.control}
+                    control={paymentForm.control}
                     name="cardCvv"
                     render={({ field }) => (
                       <FormItem>
@@ -582,9 +641,9 @@ export const AuthForm = () => {
                 <div className="text-xs text-muted-foreground text-center mt-2">
                   Acest formular este doar pentru demonstrație. Nu introduce date reale!
                 </div>
-                {step3Form.formState.errors.root && (
+                {paymentForm.formState.errors.root && (
                   <p className="text-red-500 text-sm mt-2">
-                    {step3Form.formState.errors.root.message}
+                    {paymentForm.formState.errors.root.message}
                   </p>
                 )}
               </form>

@@ -1,3 +1,4 @@
+
 import { User, Order, OrderStatus, Message, TokenPurchase } from '../contexts/AppContext';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -5,55 +6,35 @@ export const api = {
   auth: {
     async start(userData: Partial<User>): Promise<{ success: boolean; user?: Partial<User>; error?: string }> {
       try {
-        // Check if user exists by phone number
-        const { data: existingUser } = await supabase
-          .from('users_meta')
-          .select('*')
-          .eq('phone', userData.phone)
-          .single();
-        
-        if (existingUser) {
-          return { 
-            success: true, 
-            user: { 
-              ...existingUser,
-              verified: existingUser.verified,
-              role: (existingUser.role as User['role']) || 'client'
-            }
-          };
-        }
-        
-        // Create new unverified user
-        const { data: { user }, error: authError } = await supabase.auth.signUp({
-          phone: userData.phone,
-          password: crypto.randomUUID(), // Generate random password as we'll use phone auth
-        });
-
-        if (authError) throw authError;
-
-        if (user) {
-          const { data: newUser, error: insertError } = await supabase
+        // Check if user exists by phone number (if provided)
+        if (userData.phone) {
+          const { data: existingUser } = await supabase
             .from('users_meta')
-            .insert({
-              id: user.id,
-              name: userData.name,
-              phone: userData.phone,
-              verified: false,
-              role: 'client',
-              tokens: 0
-            })
-            .select()
+            .select('*')
+            .eq('phone', userData.phone)
             .single();
-
-          if (insertError) throw insertError;
           
-          return { success: true, user: {
-            ...newUser,
-            role: 'client' as User['role']
-          }};
+          if (existingUser) {
+            return { 
+              success: true, 
+              user: { 
+                ...existingUser,
+                verified: existingUser.verified,
+                role: (existingUser.role as User['role']) || 'client'
+              }
+            };
+          }
         }
         
-        return { success: false, error: 'Could not create user' };
+        // Return partial user data for new users, to be completed after OTP verification
+        return { 
+          success: true, 
+          user: {
+            ...userData,
+            verified: false,
+            role: 'client' as User['role']
+          }
+        };
       } catch (error) {
         console.error('Error in auth.start:', error);
         return { success: false, error: error.message };
@@ -77,11 +58,12 @@ export const api = {
     
     async verifyOtp(phone: string, otp: string): Promise<{ 
       success: boolean; 
-      sessionToken?: string; 
+      sessionToken?: string;
+      user?: Partial<User>;
       error?: string 
     }> {
       try {
-        const { data: { session }, error } = await supabase.auth.verifyOtp({
+        const { data: { session, user }, error } = await supabase.auth.verifyOtp({
           phone: phone,
           token: otp,
           type: 'sms'
@@ -90,17 +72,63 @@ export const api = {
         if (error) throw error;
         
         if (session) {
-          const { error: updateError } = await supabase
+          // Check if user exists in users_meta
+          const { data: existingUser, error: userError } = await supabase
             .from('users_meta')
-            .update({ verified: true })
-            .eq('id', session.user.id);
+            .select('*')
+            .eq('id', user.id)
+            .single();
           
-          if (updateError) throw updateError;
-          
-          return { 
-            success: true, 
-            sessionToken: session.access_token 
-          };
+          if (existingUser) {
+            // Update verified status if needed
+            if (!existingUser.verified) {
+              await supabase
+                .from('users_meta')
+                .update({ verified: true })
+                .eq('id', user.id);
+            }
+            
+            return { 
+              success: true, 
+              sessionToken: session.access_token,
+              user: {
+                id: existingUser.id,
+                name: existingUser.name,
+                phone: existingUser.phone,
+                verified: true,
+                role: (existingUser.role as User['role']) || 'client',
+                tokens: existingUser.tokens || 0
+              }
+            };
+          } else {
+            // Create new user record in users_meta
+            const { data: newUser, error: insertError } = await supabase
+              .from('users_meta')
+              .insert({
+                id: user.id,
+                phone: phone,
+                verified: true,
+                role: 'client',
+                tokens: 0,
+                name: undefined
+              })
+              .select()
+              .single();
+            
+            if (insertError) throw insertError;
+            
+            return { 
+              success: true, 
+              sessionToken: session.access_token,
+              user: {
+                id: newUser.id,
+                phone: newUser.phone,
+                verified: true,
+                role: 'client',
+                tokens: 0
+              }
+            };
+          }
         }
         
         return { success: false, error: 'No session created' };
@@ -151,6 +179,25 @@ export const api = {
       } catch (error) {
         console.error('Error in verifySession:', error);
         return { success: false, error: 'Sesiune invalidă' };
+      }
+    },
+    
+    async updateUserProfile(userId: string, data: Partial<User>): Promise<{ success: boolean; error?: string }> {
+      try {
+        const { error } = await supabase
+          .from('users_meta')
+          .update({
+            name: data.name,
+            email: data.email
+          })
+          .eq('id', userId);
+          
+        if (error) throw error;
+        
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating user profile:', error);
+        return { success: false, error: error.message };
       }
     },
     
