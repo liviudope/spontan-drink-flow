@@ -1,10 +1,13 @@
-import { User, Order, OrderStatus, Message } from '../contexts/AppContext';
+
+import { User, Order, OrderStatus, Message, TokenPurchase } from '../contexts/AppContext';
 import { v4 as uuidv4 } from 'uuid';
 
 // Mock data
 let users: User[] = [];
 let orders: Order[] = [];
 let otpStore: Record<string, { otp: string; expires: number }> = {};
+let sessions: Record<string, { userId: string; expires: number }> = {};
+let tokenPurchases: TokenPurchase[] = [];
 
 // Helper to simulate async API calls
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -34,7 +37,8 @@ export const api = {
         name: userData.name,
         email: userData.email,
         verified: false,
-        role: 'client'
+        role: 'client',
+        tokens: 0
       };
       
       users.push(newUser);
@@ -61,7 +65,11 @@ export const api = {
       return { success: true };
     },
     
-    async verifyOtp(phone: string, otp: string): Promise<{ success: boolean; error?: string }> {
+    async verifyOtp(phone: string, otp: string): Promise<{ 
+      success: boolean; 
+      sessionToken?: string; 
+      error?: string 
+    }> {
       await delay(1000); // Simulate network delay
       
       console.log(`Verifying OTP: ${otp} for phone: ${phone}`);
@@ -86,6 +94,18 @@ export const api = {
       if (userIndex >= 0) {
         users[userIndex].verified = true;
         users[userIndex].phone = phone;
+        
+        // Create a session token
+        const sessionToken = uuidv4();
+        const userId = users[userIndex].id!;
+        
+        // Store session with 30 day expiry
+        sessions[sessionToken] = {
+          userId,
+          expires: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+        };
+        
+        return { success: true, sessionToken };
       }
       
       // Clear OTP
@@ -94,7 +114,31 @@ export const api = {
       return { success: true };
     },
     
-    async addPaymentMethod(userId: string, cardData: any): Promise<{ success: boolean; error?: string }> {
+    async verifySession(token: string): Promise<{ success: boolean; user?: User; error?: string }> {
+      await delay(500);
+      
+      const session = sessions[token];
+      
+      if (!session) {
+        return { success: false, error: 'Sesiune invalidă' };
+      }
+      
+      if (Date.now() > session.expires) {
+        delete sessions[token];
+        return { success: false, error: 'Sesiunea a expirat' };
+      }
+      
+      const user = users.find(u => u.id === session.userId);
+      
+      if (!user) {
+        delete sessions[token];
+        return { success: false, error: 'Utilizator negăsit' };
+      }
+      
+      return { success: true, user };
+    },
+    
+    async addPaymentMethod(userId: string, cardData: any): Promise<{ success: boolean; sessionToken?: string; error?: string }> {
       await delay(1000); // Simulate network delay
       
       // Validate card data (mock)
@@ -106,22 +150,119 @@ export const api = {
       const userIndex = users.findIndex(u => u.id === userId);
       if (userIndex >= 0) {
         users[userIndex].paymentVerified = true;
+        
+        // Create a session token
+        const sessionToken = uuidv4();
+        
+        // Store session with 30 day expiry
+        sessions[sessionToken] = {
+          userId,
+          expires: Date.now() + 30 * 24 * 60 * 60 * 1000, // 30 days
+        };
+        
+        return { success: true, sessionToken };
       } else {
         return { success: false, error: 'Utilizator negăsit' };
       }
+    }
+  },
+  
+  tokens: {
+    async getUserTokens(userId: string): Promise<{
+      success: boolean;
+      tokens?: number;
+      error?: string;
+    }> {
+      await delay(500);
       
-      return { success: true };
+      const user = users.find(u => u.id === userId);
+      
+      if (!user) {
+        return { success: false, error: 'Utilizator negăsit' };
+      }
+      
+      return { success: true, tokens: user.tokens || 0 };
+    },
+    
+    async purchaseTokens(userId: string, packageId: string): Promise<{
+      success: boolean;
+      purchase?: TokenPurchase;
+      error?: string;
+    }> {
+      await delay(1500); // Simulate payment processing
+      
+      const user = users.find(u => u.id === userId);
+      
+      if (!user) {
+        return { success: false, error: 'Utilizator negăsit' };
+      }
+      
+      // Define packages
+      const packages = {
+        '50': { tokens: 50, price: 50, bonus: 0 },
+        '100': { tokens: 100, price: 100, bonus: 0 },
+        '300': { tokens: 300, price: 300, bonus: 0 },
+        '500': { tokens: 500, price: 500, bonus: 25 }
+      };
+      
+      const selectedPackage = packages[packageId as keyof typeof packages];
+      
+      if (!selectedPackage) {
+        return { success: false, error: 'Pachet invalid' };
+      }
+      
+      // Create purchase record
+      const purchase: TokenPurchase = {
+        id: uuidv4(),
+        userId,
+        amount: selectedPackage.tokens,
+        price: selectedPackage.price,
+        bonusTokens: selectedPackage.bonus,
+        timestamp: new Date().toISOString()
+      };
+      
+      // Update user tokens
+      const userIndex = users.findIndex(u => u.id === userId);
+      users[userIndex].tokens = (users[userIndex].tokens || 0) + selectedPackage.tokens + selectedPackage.bonus;
+      
+      // Save purchase history
+      tokenPurchases.push(purchase);
+      
+      return { success: true, purchase };
+    },
+    
+    async getPurchaseHistory(userId: string): Promise<{
+      success: boolean;
+      purchases?: TokenPurchase[];
+      error?: string;
+    }> {
+      await delay(800);
+      
+      const userPurchases = tokenPurchases.filter(p => p.userId === userId);
+      
+      return { success: true, purchases: userPurchases };
     }
   },
   
   chat: {
-    async parseMessage(message: string): Promise<{ 
+    async parseMessage(message: string, userId: string): Promise<{ 
       success: boolean; 
       drink?: string; 
       options?: any;
-      error?: string 
+      error?: string;
+      insufficientTokens?: boolean;
     }> {
       await delay(1000); // Simulate NLP processing
+      
+      // Check if user has tokens
+      const user = users.find(u => u.id === userId);
+      if (!user || !user.tokens || user.tokens <= 0) {
+        return { 
+          success: false, 
+          insufficientTokens: true,
+          error: 'Nu ai suficienți tokenuri pentru a plasa o comandă'
+        };
+      }
       
       // Very simple drink detection for the mock
       const drinkKeywords: {[key: string]: string} = {
@@ -192,9 +333,28 @@ export const api = {
     async create(userId: string, drink: string, options: any): Promise<{ 
       success: boolean; 
       order?: Order; 
-      error?: string 
+      error?: string;
+      insufficientTokens?: boolean;
     }> {
       await delay(1000); // Simulate network delay
+      
+      // Find the user
+      const userIndex = users.findIndex(u => u.id === userId);
+      if (userIndex === -1) {
+        return { success: false, error: 'Utilizator negăsit' };
+      }
+      
+      // Check if user has tokens
+      if (!users[userIndex].tokens || users[userIndex].tokens <= 0) {
+        return {
+          success: false,
+          insufficientTokens: true,
+          error: 'Nu ai suficienți tokenuri pentru a plasa o comandă'
+        };
+      }
+      
+      // Deduct one token for the order
+      users[userIndex].tokens = users[userIndex].tokens! - 1;
       
       // Generate pickup code
       const pickupCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -290,12 +450,32 @@ export const api = {
     async checkIn(qrCode: string, userId: string): Promise<{ 
       success: boolean; 
       eventName?: string; 
-      error?: string 
+      error?: string;
+      insufficientTokens?: boolean;
     }> {
       await delay(1000);
       
+      // Find the user
+      const user = users.find(u => u.id === userId);
+      if (!user) {
+        return { success: false, error: 'Utilizator negăsit' };
+      }
+      
+      // Check if user has tokens
+      if (!user.tokens || user.tokens <= 0) {
+        return {
+          success: false,
+          insufficientTokens: true,
+          error: 'Nu ai suficienți tokenuri pentru check-in'
+        };
+      }
+      
       // Mock validation - in a real app, would validate against actual events
       if (qrCode.startsWith('EVT')) {
+        // Deduct one token for check-in
+        const userIndex = users.findIndex(u => u.id === userId);
+        users[userIndex].tokens = users[userIndex].tokens! - 1;
+        
         return { 
           success: true,
           eventName: "Summer Vibes Party @ Club Spontan"

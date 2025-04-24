@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -100,6 +101,59 @@ export const AuthForm = () => {
     }
   }, [step, otpForm]);
 
+  // Check if we already have a session
+  useEffect(() => {
+    const sessionData = localStorage.getItem('spontanSession');
+    if (sessionData) {
+      try {
+        const { token } = JSON.parse(sessionData);
+        if (token) {
+          verifyAndRestoreSession(token);
+        }
+      } catch (error) {
+        console.error('Error parsing session data:', error);
+        localStorage.removeItem('spontanSession');
+      }
+    }
+  }, []);
+
+  const verifyAndRestoreSession = async (token: string) => {
+    setIsLoading(true);
+    try {
+      const response = await api.auth.verifySession(token);
+      if (response.success && response.user) {
+        dispatch({ type: 'SET_SESSION_TOKEN', payload: token });
+        dispatch({ type: 'SET_USER', payload: response.user });
+        
+        // Check if user has tokens
+        const tokensResponse = await api.tokens.getUserTokens(response.user.id!);
+        if (tokensResponse.success) {
+          dispatch({ type: 'UPDATE_USER_TOKENS', payload: tokensResponse.tokens || 0 });
+          
+          // If user has no tokens, redirect to tokens page
+          if (tokensResponse.tokens === 0) {
+            navigate('/tokens');
+            toast({
+              title: "Tokens necesari",
+              description: "Nu ai tokens în cont. Te rugăm să achiziționezi tokens pentru a continua.",
+              variant: "default",
+            });
+            return;
+          }
+        }
+        
+        navigate('/');
+      } else {
+        localStorage.removeItem('spontanSession');
+      }
+    } catch (error) {
+      console.error('Error verifying session:', error);
+      localStorage.removeItem('spontanSession');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const onSubmitStep1 = async (data: z.infer<typeof Step1Schema>) => {
     setIsLoading(true);
     try {
@@ -165,6 +219,12 @@ export const AuthForm = () => {
       );
 
       if (response.success) {
+        if (response.sessionToken) {
+          // Store session token for persistent login
+          localStorage.setItem('spontanSession', JSON.stringify({ token: response.sessionToken }));
+          dispatch({ type: 'SET_SESSION_TOKEN', payload: response.sessionToken });
+        }
+        
         dispatch({
           type: "UPDATE_TEMP_USER_DATA",
           payload: { verified: true },
@@ -195,19 +255,32 @@ export const AuthForm = () => {
       );
 
       if (response.success) {
-        dispatch({
-          type: "SET_USER",
-          payload: {
-            id: state.tempUserData.id || "",
-            name: state.tempUserData.name || "",
-            email: state.tempUserData.email || "",
-            phone: state.tempUserData.phone || "",
-            verified: true,
-            role: state.tempUserData.role || "client",
-            paymentVerified: true,
-          },
+        // Store session token for persistent login
+        if (response.sessionToken) {
+          localStorage.setItem('spontanSession', JSON.stringify({ token: response.sessionToken }));
+          dispatch({ type: 'SET_SESSION_TOKEN', payload: response.sessionToken });
+        }
+        
+        const user = {
+          id: state.tempUserData.id || "",
+          name: state.tempUserData.name || "",
+          email: state.tempUserData.email || "",
+          phone: state.tempUserData.phone || "",
+          verified: true,
+          role: state.tempUserData.role || "client",
+          paymentVerified: true,
+          tokens: 0
+        };
+        
+        dispatch({ type: "SET_USER", payload: user });
+        
+        // Redirect to tokens page since user has 0 tokens
+        navigate("/tokens");
+        toast({
+          title: "Cont creat cu succes!",
+          description: "Acum trebuie să achiziționezi tokens pentru a putea folosi aplicația.",
+          variant: "default",
         });
-        navigate("/");
       } else {
         step3Form.setError("root", { message: response.error });
       }

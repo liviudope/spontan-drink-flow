@@ -1,310 +1,249 @@
 
-import { useState, useEffect, useRef } from "react";
-import { useApp } from "@/contexts/AppContext";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Send, Loader } from "lucide-react";
-import { api } from "@/services/api";
+import { useState, useRef, useEffect } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 import { v4 as uuidv4 } from "uuid";
-import { GlassMorphicCard } from "../shared/GlassMorphicCard";
-import { LoadingButton } from "../shared/LoadingButton";
-import { toast } from "sonner";
+import { api } from "@/services/api";
+import { useApp } from "@/contexts/AppContext";
+import { Button } from "@/components/ui/button";
+import { LoadingButton } from "@/components/shared/LoadingButton";
+import { Form, FormControl, FormField, FormItem } from "@/components/ui/form";
+import { Textarea } from "@/components/ui/textarea";
+import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
+
+const formSchema = z.object({
+  message: z.string().min(2, {
+    message: "Mesajul trebuie să conțină cel puțin 2 caractere.",
+  }),
+});
 
 export const ChatInterface = () => {
   const { state, dispatch } = useApp();
-  const [message, setMessage] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [isProcessingOrder, setIsProcessingOrder] = useState(false);
-  const [currentDrink, setCurrentDrink] = useState<{ name: string; options: any } | null>(null);
+  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const { toast } = useToast();
 
+  // Auto-scroll to bottom of messages
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
-    if (state.chatHistory.length === 0) {
-      // Add welcome message if chat is empty
-      dispatch({
-        type: "ADD_MESSAGE",
-        payload: {
-          id: uuidv4(),
-          sender: "ai",
-          content: "Bun venit la Spontan! Ce băutură dorești să comanzi astăzi?",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
     scrollToBottom();
-  }, [state.chatHistory.length, dispatch]);
+  }, [state.chatHistory]);
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!message.trim()) return;
+  const form = useForm<z.infer<typeof formSchema>>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      message: "",
+    },
+  });
+
+  const handleClearChat = () => {
+    dispatch({ type: "CLEAR_CHAT_HISTORY" });
+  };
+
+  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+    if (isLoading) return;
+
+    const userMessage = {
+      id: uuidv4(),
+      sender: "user" as const,
+      content: values.message,
+      timestamp: new Date().toISOString(),
+    };
 
     // Add user message to chat
-    const userMessageId = uuidv4();
-    dispatch({
-      type: "ADD_MESSAGE",
-      payload: {
-        id: userMessageId,
-        sender: "user",
-        content: message,
-        timestamp: new Date().toISOString(),
-      },
-    });
+    dispatch({ type: "ADD_MESSAGE", payload: userMessage });
+    form.reset();
 
-    setMessage("");
-    setIsTyping(true);
+    setIsLoading(true);
 
     try {
-      // Parse the message for drink order
-      const response = await api.chat.parseMessage(message);
+      // Process message with AI
+      const response = await api.chat.parseMessage(values.message, state.user?.id || '');
 
-      if (response.success && response.drink) {
-        setCurrentDrink({
-          name: response.drink,
-          options: response.options,
-        });
+      if (response.success) {
+        // If successful, add response to chat
+        const aiMessage = {
+          id: uuidv4(),
+          sender: "ai" as const,
+          content: `Am înțeles că dorești ${response.drink}. Confirm acest lucru?`,
+          timestamp: new Date().toISOString(),
+        };
+        dispatch({ type: "ADD_MESSAGE", payload: aiMessage });
 
-        // Generate price for demo
-        const basePrice = 20;
-        let sizeMultiplier = 1;
-        if (response.options?.size === 'large') sizeMultiplier = 1.5;
-        if (response.options?.size === 'small') sizeMultiplier = 0.8;
-        
-        const price = Math.round(basePrice * sizeMultiplier);
+        // Create order
+        const orderResponse = await api.orders.create(
+          state.user?.id!,
+          response.drink!,
+          response.options
+        );
 
-        // Respond with confirmation
-        dispatch({
-          type: "ADD_MESSAGE",
-          payload: {
+        if (orderResponse.success && orderResponse.order) {
+          dispatch({ type: "ADD_ORDER", payload: orderResponse.order });
+          dispatch({ type: "SET_CURRENT_ORDER", payload: orderResponse.order });
+          
+          // Update tokens count
+          if (state.user?.tokens !== undefined) {
+            dispatch({ type: "UPDATE_USER_TOKENS", payload: state.user.tokens - 1 });
+          }
+          
+          // Confirmation message
+          const confirmMessage = {
             id: uuidv4(),
-            sender: "ai",
-            content: `Am primit comanda ta:\n\n🍹 **${response.drink}**\n\n**Opțiuni:**\n${
-              response.options?.size === 'large' ? '- Mărime: Mare\n' : 
-              response.options?.size === 'small' ? '- Mărime: Mică\n' : 
-              '- Mărime: Medie\n'
-            }${
-              response.options?.ice === false ? '- Fără gheață\n' : '- Cu gheață\n'
-            }${
-              response.options?.strength ? `- Tărie: ${
-                response.options.strength === 'strong' ? 'Tare' : 
-                response.options.strength === 'light' ? 'Slabă' : 'Normală'
-              }\n` : ''
-            }\n**Preț:** ${price} RON\n\nConfirmi comanda?`,
+            sender: "ai" as const,
+            content: `Comanda ta pentru ${response.drink} a fost creată! Poți urmări statusul comenzii în secțiunea de mai jos.`,
             timestamp: new Date().toISOString(),
-          },
-        });
+          };
+          dispatch({ type: "ADD_MESSAGE", payload: confirmMessage });
+        } else {
+          // Error handling
+          let errorMessage = orderResponse.error || "A apărut o eroare la crearea comenzii.";
+          
+          // Handle insufficient tokens
+          if (orderResponse.insufficientTokens) {
+            errorMessage = "Nu ai suficienți tokenuri pentru a plasa o comandă.";
+            
+            toast({
+              title: "Tokenuri insuficiente",
+              description: "Nu ai suficienți tokenuri pentru a plasa o comandă.",
+              variant: "destructive",
+            });
+            
+            // Redirect to tokens page
+            setTimeout(() => navigate("/tokens"), 2000);
+          }
+          
+          const errorAiMessage = {
+            id: uuidv4(),
+            sender: "ai" as const,
+            content: errorMessage,
+            timestamp: new Date().toISOString(),
+          };
+          dispatch({ type: "ADD_MESSAGE", payload: errorAiMessage });
+        }
       } else {
-        // Couldn't understand the order
-        dispatch({
-          type: "ADD_MESSAGE",
-          payload: {
-            id: uuidv4(),
-            sender: "ai",
-            content: response.error || "Nu am înțeles ce băutură dorești. Poți să reformulezi?",
-            timestamp: new Date().toISOString(),
-          },
-        });
-        setCurrentDrink(null);
+        // Handle error from AI parsing
+        let errorContent = response.error || "Nu am putut procesa cererea ta. Te rog încearcă din nou.";
+        
+        // Handle insufficient tokens
+        if (response.insufficientTokens) {
+          errorContent = "Nu ai suficienți tokenuri pentru a plasa o comandă.";
+          
+          toast({
+            title: "Tokenuri insuficiente",
+            description: "Nu ai suficienți tokenuri pentru a plasa o comandă.",
+            variant: "destructive",
+          });
+          
+          // Redirect to tokens page
+          setTimeout(() => navigate("/tokens"), 2000);
+        }
+        
+        const aiErrorMessage = {
+          id: uuidv4(),
+          sender: "ai" as const,
+          content: errorContent,
+          timestamp: new Date().toISOString(),
+        };
+        dispatch({ type: "ADD_MESSAGE", payload: aiErrorMessage });
       }
     } catch (error) {
       console.error("Error processing message:", error);
-      dispatch({
-        type: "ADD_MESSAGE",
-        payload: {
-          id: uuidv4(),
-          sender: "ai",
-          content: "A apărut o eroare. Te rog încearcă din nou.",
-          timestamp: new Date().toISOString(),
-        },
-      });
-      setCurrentDrink(null);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const handleConfirmOrder = async () => {
-    if (!currentDrink || !state.user?.id) return;
-    
-    setIsProcessingOrder(true);
-    
-    try {
-      const response = await api.orders.create(
-        state.user.id,
-        currentDrink.name,
-        currentDrink.options
-      );
-
-      if (response.success && response.order) {
-        // Add confirmation message
-        dispatch({
-          type: "ADD_MESSAGE",
-          payload: {
-            id: uuidv4(),
-            sender: "ai",
-            content: `✅ Comanda a fost plasată cu succes!\n\nCodul tău de ridicare: **${response.order.pickupCode}**\n\nVei primi o notificare când băutura ta este gata.`,
-            timestamp: new Date().toISOString(),
-          },
-        });
-        
-        // Add the order to state
-        dispatch({
-          type: "ADD_ORDER",
-          payload: response.order
-        });
-        
-        // Set as current order
-        dispatch({
-          type: "SET_CURRENT_ORDER",
-          payload: response.order
-        });
-        
-        toast.success("Comandă plasată cu succes!");
-        
-        // Reset current drink
-        setCurrentDrink(null);
-      } else {
-        dispatch({
-          type: "ADD_MESSAGE",
-          payload: {
-            id: uuidv4(),
-            sender: "ai",
-            content: response.error || "A apărut o eroare la plasarea comenzii. Te rog încearcă din nou.",
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-    } catch (error) {
-      console.error("Error placing order:", error);
-      dispatch({
-        type: "ADD_MESSAGE",
-        payload: {
-          id: uuidv4(),
-          sender: "ai",
-          content: "A apărut o eroare la plasarea comenzii. Te rog încearcă din nou.",
-          timestamp: new Date().toISOString(),
-        },
-      });
-    } finally {
-      setIsProcessingOrder(false);
-    }
-  };
-
-  const handleCancelOrder = () => {
-    setCurrentDrink(null);
-    dispatch({
-      type: "ADD_MESSAGE",
-      payload: {
+      
+      // Add error message to chat
+      const errorMessage = {
         id: uuidv4(),
-        sender: "ai",
-        content: "Comandă anulată. Cu ce altceva te pot ajuta?",
+        sender: "ai" as const,
+        content: "A apărut o eroare la procesarea mesajului tău. Te rog încearcă din nou.",
         timestamp: new Date().toISOString(),
-      },
-    });
+      };
+      dispatch({ type: "ADD_MESSAGE", payload: errorMessage });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-200px)] md:h-[calc(100vh-160px)]">
-      <div className="flex-1 overflow-y-auto scrollbar-none p-4">
-        <div className="space-y-4">
-          {state.chatHistory.map((msg) => (
+    <div className="flex flex-col h-full bg-opacity-30 backdrop-blur-md bg-gray-900 rounded-lg overflow-hidden">
+      {/* Chat Header */}
+      <div className="bg-primary/10 p-4 flex justify-between items-center">
+        <h3 className="font-semibold">Comandă o băutură</h3>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          onClick={handleClearChat}
+        >
+          Șterge conversația
+        </Button>
+      </div>
+
+      {/* Chat Messages */}
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {state.chatHistory.length === 0 ? (
+          <div className="text-center text-gray-400 my-8">
+            <p>Spune-i barmanului virtual ce băutură dorești.</p>
+            <p className="mt-2 text-sm">Exemplu: "Aș dori un mojito cu gheață, te rog."</p>
+          </div>
+        ) : (
+          state.chatHistory.map((message) => (
             <div
-              key={msg.id}
+              key={message.id}
               className={`flex ${
-                msg.sender === "user" ? "justify-end" : "justify-start"
+                message.sender === "user" ? "justify-end" : "justify-start"
               }`}
             >
               <div
-                className={`max-w-[80%] md:max-w-[70%] rounded-2xl p-4 ${
-                  msg.sender === "user"
-                    ? "bg-neon-purple/20 text-white"
-                    : "glass-effect"
+                className={`max-w-[80%] rounded-lg p-4 ${
+                  message.sender === "user"
+                    ? "bg-primary text-primary-foreground rounded-br-none"
+                    : "bg-muted text-muted-foreground rounded-bl-none"
                 }`}
               >
-                <div className="whitespace-pre-wrap">
-                  {msg.content.split("\n").map((line, i) => {
-                    // Handle markdown-like bold text
-                    const parts = line.split(/(\*\*.*?\*\*)/g);
-                    return (
-                      <p key={i} className="mb-1">
-                        {parts.map((part, j) => {
-                          if (part.startsWith("**") && part.endsWith("**")) {
-                            return (
-                              <strong key={j}>
-                                {part.substring(2, part.length - 2)}
-                              </strong>
-                            );
-                          }
-                          return part;
-                        })}
-                      </p>
-                    );
-                  })}
-                </div>
+                <p className="break-words">{message.content}</p>
               </div>
             </div>
-          ))}
-          {isTyping && (
-            <div className="flex justify-start">
-              <div className="glass-effect rounded-2xl p-4">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 rounded-full bg-neon-blue animate-pulse" />
-                  <div className="w-2 h-2 rounded-full bg-neon-blue animate-pulse delay-75" />
-                  <div className="w-2 h-2 rounded-full bg-neon-blue animate-pulse delay-150" />
-                </div>
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
       </div>
 
-      {currentDrink ? (
-        <GlassMorphicCard variant="blue" className="mb-4 p-4">
-          <div className="flex flex-col space-y-4">
-            <h3 className="font-medium text-lg">Confirmare comandă</h3>
-            <div className="flex justify-between">
-              <LoadingButton
-                isLoading={isProcessingOrder}
-                loadingText="Se procesează..."
-                onClick={handleConfirmOrder}
-                className="flex-1 mr-2"
-              >
-                Confirmă comanda
-              </LoadingButton>
-              <Button
-                variant="outline"
-                onClick={handleCancelOrder}
-                disabled={isProcessingOrder}
-                className="flex-1 ml-2"
-              >
-                Anulează
-              </Button>
-            </div>
-          </div>
-        </GlassMorphicCard>
-      ) : (
-        <form onSubmit={handleSendMessage} className="mt-4">
-          <div className="flex">
-            <Input
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Scrie ce băutură dorești..."
-              className="rounded-r-none focus-visible:ring-0 focus-visible:ring-transparent focus-visible:ring-offset-0 border-r-0"
+      {/* Chat Input */}
+      <div className="p-4 border-t border-gray-700">
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-2">
+            <FormField
+              control={form.control}
+              name="message"
+              render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Spune ce băutură dorești..."
+                      className="min-h-24 resize-none"
+                      disabled={isLoading}
+                      {...field}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
             />
-            <Button
-              type="submit"
-              className="rounded-l-none"
-              disabled={!message.trim() || isTyping}
-            >
-              {isTyping ? <Loader className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </Button>
-          </div>
-        </form>
-      )}
+            <div className="flex justify-end">
+              <LoadingButton
+                type="submit"
+                isLoading={isLoading}
+                loadingText="Se trimite..."
+              >
+                Trimite
+              </LoadingButton>
+            </div>
+          </form>
+        </Form>
+      </div>
     </div>
   );
 };
