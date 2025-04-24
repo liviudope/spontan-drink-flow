@@ -17,7 +17,8 @@ export const api = {
             success: true, 
             user: { 
               ...existingUser,
-              verified: existingUser.verified 
+              verified: existingUser.verified,
+              role: existingUser.role || 'client'
             }
           };
         }
@@ -38,6 +39,7 @@ export const api = {
               name: userData.name,
               phone: userData.phone,
               verified: false,
+              role: 'client',
               tokens: 0
             })
             .select()
@@ -108,7 +110,7 @@ export const api = {
     
     async verifySession(token: string): Promise<{ success: boolean; user?: User; error?: string }> {
       try {
-        const { data: { user }, error } = await supabase.auth.getUser(token ? { access_token: token } : undefined);
+        const { data: { user }, error } = await supabase.auth.getUser(token);
     
         if (error) {
           console.error('Error verifying session:', error);
@@ -135,7 +137,17 @@ export const api = {
           return { success: false, error: 'Utilizator negăsit' };
         }
     
-        return { success: true, user: userMeta };
+        // Make sure to include the role property
+        const userData: User = {
+          id: userMeta.id,
+          name: userMeta.name,
+          phone: userMeta.phone,
+          verified: userMeta.verified,
+          tokens: userMeta.tokens,
+          role: userMeta.role || 'client'
+        };
+    
+        return { success: true, user: userData };
       } catch (error) {
         console.error('Error in verifySession:', error);
         return { success: false, error: 'Sesiune invalidă' };
