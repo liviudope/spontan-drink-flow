@@ -1,24 +1,24 @@
-
 import { useEffect, useState } from "react";
 import { useApp } from "@/contexts/AppContext";
 import { api } from "@/services/api";
 import { GlassMorphicCard } from "../shared/GlassMorphicCard";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { useToast } from "sonner";
 import { LoadingButton } from "../shared/LoadingButton";
 
 export const OrderStatus = () => {
   const { state, dispatch } = useApp();
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const { toast } = useToast();
 
   const currentOrder = state.currentOrder;
 
   useEffect(() => {
-    // Load active orders on mount if there's no current order
-    if (!currentOrder && state.user?.id) {
-      loadActiveOrders();
-    }
+    loadActiveOrders();
+    // Check for updates every 10 seconds
+    const interval = setInterval(loadActiveOrders, 10000);
+    return () => clearInterval(interval);
   }, [state.user?.id]);
 
   const loadActiveOrders = async () => {
@@ -37,10 +37,27 @@ export const OrderStatus = () => {
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
 
+        // Get most recent order
+        const latestOrder = sortedOrders[0];
+
+        // Show notification if status changed
+        if (currentOrder && latestOrder.status !== currentOrder.status) {
+          switch (latestOrder.status) {
+            case "preparing":
+              toast.success("Comanda ta este în preparare!");
+              break;
+            case "ready":
+              toast.success("Băutura ta este gata! Poți să o ridici folosind codul de ridicare.", {
+                duration: 10000,
+              });
+              break;
+          }
+        }
+
         // Set most recent as current order
         dispatch({
           type: "SET_CURRENT_ORDER",
-          payload: sortedOrders[0],
+          payload: latestOrder,
         });
       }
     } catch (error) {

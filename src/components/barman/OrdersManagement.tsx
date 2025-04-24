@@ -31,7 +31,6 @@ export const OrdersManagement = () => {
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
 
-        // Filter orders by status
         setPendingOrders(sortedOrders.filter(order => order.status === "pending"));
         setPreparingOrders(sortedOrders.filter(order => order.status === "preparing"));
         setReadyOrders(sortedOrders.filter(order => order.status === "ready"));
@@ -46,9 +45,8 @@ export const OrdersManagement = () => {
 
   useEffect(() => {
     loadOrders();
-
-    // Set up interval to refresh orders every 30 seconds
-    const interval = setInterval(loadOrders, 30000);
+    // Refresh orders every 10 seconds instead of 30
+    const interval = setInterval(loadOrders, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -58,7 +56,14 @@ export const OrdersManagement = () => {
       const response = await api.orders.updateStatus(orderId, status);
 
       if (response.success && response.order) {
-        toast.success(`Comandă actualizată: ${status}`);
+        // Show different toast messages based on status
+        if (status === "preparing") {
+          toast.success("Comandă acceptată și în preparare");
+        } else if (status === "ready") {
+          toast.success("Comandă marcată ca gata pentru ridicare");
+        } else {
+          toast.success(`Comandă actualizată: ${status}`);
+        }
         
         // Update local state
         dispatch({
@@ -69,7 +74,7 @@ export const OrdersManagement = () => {
           },
         });
         
-        // Refresh orders
+        // Refresh orders immediately
         loadOrders();
       } else {
         toast.error(response.error || "Eroare la actualizarea comenzii");
