@@ -87,7 +87,6 @@ export const api = {
         if (error) throw error;
         
         if (session) {
-          // Update user as verified
           const { error: updateError } = await supabase
             .from('users_meta')
             .update({ verified: true })
@@ -121,7 +120,6 @@ export const api = {
           return { success: false, error: 'Utilizator negăsit' };
         }
     
-        // Fetch user metadata from our users_meta table
         const { data: userMeta, error: userError } = await supabase
           .from('users_meta')
           .select('*')
@@ -137,13 +135,12 @@ export const api = {
           return { success: false, error: 'Utilizator negăsit' };
         }
     
-        // Make sure to include the role property
         const userData: User = {
           id: userMeta.id,
-          name: userMeta.name,
-          phone: userMeta.phone,
-          verified: userMeta.verified,
-          tokens: userMeta.tokens,
+          name: userMeta.name || undefined,
+          phone: userMeta.phone || undefined,
+          verified: userMeta.verified || false,
+          tokens: userMeta.tokens || 0,
           role: userMeta.role || 'client'
         };
     
@@ -155,18 +152,12 @@ export const api = {
     },
     
     async addPaymentMethod(userId: string, cardData: any): Promise<{ success: boolean; sessionToken?: string; error?: string }> {
-      // This is a mock implementation. In a real application, you would
-      // integrate with a payment gateway like Stripe or PayPal to process
-      // the payment and securely store the payment method.
-      
       await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
       
-      // Validate card data (mock)
       if (!cardData.number || !cardData.name || !cardData.cvv || !cardData.expiry) {
         return { success: false, error: 'Toate câmpurile cardului sunt necesare' };
       }
       
-      // Since this is a mock, we'll just return a success response
       return { success: true };
     }
   },
@@ -199,7 +190,6 @@ export const api = {
       error?: string;
     }> {
       try {
-        // Define packages
         const packages = {
           '50': { tokens: 50, price: 50, bonus: 0 },
           '100': { tokens: 100, price: 100, bonus: 0 },
@@ -213,7 +203,6 @@ export const api = {
           return { success: false, error: 'Pachet invalid' };
         }
         
-        // Update user tokens in database
         const { error: updateError } = await supabase
           .from('users_meta')
           .update({ tokens: () => `tokens + ${selectedPackage.tokens + selectedPackage.bonus}` })
@@ -221,7 +210,6 @@ export const api = {
         
         if (updateError) throw updateError;
         
-        // Create purchase record (you might want to store this in a separate table)
         const purchase: TokenPurchase = {
           id: crypto.randomUUID(),
           userId,
@@ -243,12 +231,9 @@ export const api = {
       purchases?: TokenPurchase[];
       error?: string;
     }> {
-      // This is a mock implementation. In a real application, you would
-      // fetch the purchase history from a database.
+      await new Promise(resolve => setTimeout(resolve, 800));
       
-      await new Promise(resolve => setTimeout(resolve, 800)); // Simulate network delay
-      
-      return { success: true, purchases: [] }; // Return an empty array for now
+      return { success: true, purchases: [] };
     }
   },
   
@@ -260,9 +245,8 @@ export const api = {
       error?: string;
       insufficientTokens?: boolean;
     }> {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate NLP processing
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Check if user has tokens
       const { data: userMeta, error: userError } = await supabase
         .from('users_meta')
         .select('tokens')
@@ -282,7 +266,6 @@ export const api = {
         };
       }
       
-      // Very simple drink detection for the mock
       const drinkKeywords: {[key: string]: string} = {
         'cuba libre': 'Cuba Libre',
         'mojito': 'Mojito',
@@ -317,7 +300,6 @@ export const api = {
         };
       }
       
-      // Simple option detection
       const options: any = {
         size: 'medium',
         ice: true,
@@ -354,9 +336,8 @@ export const api = {
       error?: string;
       insufficientTokens?: boolean;
     }> {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Find the user
       const { data: userMeta, error: userError } = await supabase
         .from('users_meta')
         .select('tokens')
@@ -376,7 +357,6 @@ export const api = {
         };
       }
       
-      // Deduct one token for the order
       const { error: updateError } = await supabase
         .from('users_meta')
         .update({ tokens: userMeta.tokens - 1 })
@@ -387,7 +367,6 @@ export const api = {
         return { success: false, error: updateError.message };
       }
       
-      // Generate pickup code
       const pickupCode = Math.random().toString(36).substring(2, 8).toUpperCase();
       
       const newOrder: Order = {
@@ -410,7 +389,6 @@ export const api = {
     }> {
       await new Promise(resolve => setTimeout(resolve, 800));
       
-      // Mock implementation - replace with actual database query
       const mockOrders: Order[] = [];
       
       return { success: true, orders: mockOrders };
@@ -423,7 +401,6 @@ export const api = {
     }> {
       await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Mock implementation - replace with actual database update
       return { success: true };
     },
     
@@ -434,7 +411,6 @@ export const api = {
     }> {
       await new Promise(resolve => setTimeout(resolve, 700));
       
-      // Mock implementation - replace with actual database query
       return { success: false, error: 'Cod invalid sau comandă indisponibilă' };
     }
   },
@@ -448,7 +424,6 @@ export const api = {
     }> {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
-      // Find the user
       const { data: userMeta, error: userError } = await supabase
         .from('users_meta')
         .select('tokens')
@@ -468,9 +443,7 @@ export const api = {
         };
       }
       
-      // Mock validation - in a real app, would validate against actual events
       if (qrCode.startsWith('EVT')) {
-        // Deduct one token for check-in
         const { error: updateError } = await supabase
           .from('users_meta')
           .update({ tokens: userMeta.tokens - 1 })

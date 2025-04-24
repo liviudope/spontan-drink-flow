@@ -93,6 +93,7 @@ export type Database = {
           id: string
           name: string | null
           phone: string | null
+          role: string | null
           tokens: number | null
           updated_at: string | null
           verified: boolean | null
@@ -102,6 +103,7 @@ export type Database = {
           id: string
           name?: string | null
           phone?: string | null
+          role?: string | null
           tokens?: number | null
           updated_at?: string | null
           verified?: boolean | null
@@ -111,6 +113,7 @@ export type Database = {
           id?: string
           name?: string | null
           phone?: string | null
+          role?: string | null
           tokens?: number | null
           updated_at?: string | null
           verified?: boolean | null

@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useReducer, ReactNode, useEffect } from 'react';
 import { api } from '@/services/api';
 import { supabase } from '@/integrations/supabase/client';
@@ -203,13 +202,11 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [state, dispatch] = useReducer(appReducer, initialState);
 
-  // Check for existing session on app load
   useEffect(() => {
     const initializeAuth = async () => {
       const { data: { session }, error } = await supabase.auth.getSession();
       
       if (session?.user) {
-        // Fetch user metadata from our users_meta table
         const { data: userMeta, error: userError } = await supabase
           .from('users_meta')
           .select('*')
@@ -234,7 +231,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
     initializeAuth();
 
-    // Set up auth state change listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (session?.user) {
