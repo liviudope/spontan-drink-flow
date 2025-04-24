@@ -1,8 +1,10 @@
 
 import React, { createContext, useContext, useReducer, ReactNode, useEffect } from 'react';
+import { api } from '@/services/api';
+import { supabase } from '@/integrations/supabase/client';
 
 // Types
-export type UserRole = 'client' | 'barman' | 'admin';
+export type UserRole = 'client' | 'barman';
 
 export type User = {
   id?: string;
@@ -203,30 +205,67 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Check for existing session on app load
   useEffect(() => {
-    const checkSession = async () => {
-      const storedSession = localStorage.getItem('spontanSession');
-      if (storedSession) {
-        try {
-          const sessionData = JSON.parse(storedSession);
-          const response = await fetch('/api/verify-session', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ token: sessionData.token }),
-          }).then(r => r.json());
-          
-          if (response.success && response.user) {
-            dispatch({ type: 'SET_SESSION_TOKEN', payload: sessionData.token });
-            dispatch({ type: 'SET_USER', payload: response.user });
-          }
-        } catch (error) {
-          console.error('Error verifying session:', error);
-          localStorage.removeItem('spontanSession');
+    const initializeAuth = async () => {
+      const { data: { session }, error } = await supabase.auth.getSession();
+      
+      if (session?.user) {
+        // Fetch user metadata from our users_meta table
+        const { data: userMeta, error: userError } = await supabase
+          .from('users_meta')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (userMeta) {
+          dispatch({ 
+            type: 'SET_USER', 
+            payload: {
+              id: session.user.id,
+              name: userMeta.name,
+              phone: userMeta.phone,
+              verified: userMeta.verified,
+              tokens: userMeta.tokens,
+              role: userMeta.role || 'client'
+            }
+          });
         }
       }
     };
-    checkSession();
+
+    initializeAuth();
+
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          const { data: userMeta } = await supabase
+            .from('users_meta')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          
+          if (userMeta) {
+            dispatch({ 
+              type: 'SET_USER', 
+              payload: {
+                id: session.user.id,
+                name: userMeta.name,
+                phone: userMeta.phone,
+                verified: userMeta.verified,
+                tokens: userMeta.tokens,
+                role: userMeta.role || 'client'
+              }
+            });
+          }
+        } else {
+          dispatch({ type: 'LOGOUT' });
+        }
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   return (
