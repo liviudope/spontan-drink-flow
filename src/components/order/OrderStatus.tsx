@@ -45,10 +45,17 @@ export const OrderStatus = () => {
         if (currentOrder && latestOrder.status !== currentOrder.status) {
           switch (latestOrder.status) {
             case "preparing":
-              toast.success("Comanda ta este în preparare!");
+              toast({
+                title: "Status actualizat",
+                description: "Comanda ta este în preparare!",
+                variant: "default",
+              });
               break;
             case "ready":
-              toast.success("Băutura ta este gata! Poți să o ridici folosind codul de ridicare.", {
+              toast({
+                title: "Băutura este gata!",
+                description: "Poți să o ridici folosind codul de ridicare.",
+                variant: "default",
                 duration: 10000,
               });
               break;
@@ -75,7 +82,11 @@ export const OrderStatus = () => {
     try {
       const response = await api.orders.updateStatus(currentOrder.id, "cancelled");
       if (response.success) {
-        toast.success("Comanda a fost anulată");
+        toast({
+          title: "Comandă anulată",
+          description: "Comanda a fost anulată cu succes",
+          variant: "default",
+        });
         dispatch({
           type: "UPDATE_ORDER",
           payload: {
@@ -85,11 +96,19 @@ export const OrderStatus = () => {
         });
         dispatch({ type: "SET_CURRENT_ORDER", payload: null });
       } else {
-        toast.error(response.error || "Eroare la anularea comenzii");
+        toast({
+          title: "Eroare",
+          description: response.error || "Eroare la anularea comenzii",
+          variant: "destructive",
+        });
       }
     } catch (error) {
       console.error("Error cancelling order:", error);
-      toast.error("A apărut o eroare la anularea comenzii");
+      toast({
+        title: "Eroare",
+        description: "A apărut o eroare la anularea comenzii",
+        variant: "destructive",
+      });
     } finally {
       setIsLoading(false);
     }
